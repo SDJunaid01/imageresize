@@ -2,8 +2,9 @@ import JSZip from 'jszip';
 import { ImageVariant } from '../types';
 
 /**
- * Creates and triggers a download for a single image file.
- * Creates a fresh Blob stream and preserves it until the browser's download manager accepts the file.
+ * Creates and triggers a guaranteed direct download for a single image file.
+ * Converts Blob to a self-contained Data URL (Base64) to bypass Chrome localhost
+ * blob stream "Interrupted" errors and avoids premature DOM disconnection.
  */
 export function downloadSingleVariant(variant: ImageVariant, baseName: string) {
   try {
@@ -11,38 +12,47 @@ export function downloadSingleVariant(variant: ImageVariant, baseName: string) {
     const cleanName = (baseName || 'image')
       .replace(/\.[^/.]+$/, '')
       .replace(/[^a-zA-Z0-9_\-\s]/g, '')
-      .trim() || 'image';
+      .trim()
+      .replace(/\s+/g, '_') || 'image';
     const fileName = `${cleanName}_variant${variant.index}_${variant.actualSizeKb}KB.${extension}`;
 
-    // Create a fresh dedicated blob with explicit MIME type
-    const downloadBlob = new Blob([variant.blob], { type: variant.format });
-    const downloadUrl = URL.createObjectURL(downloadBlob);
-
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = fileName;
-    link.target = '_self';
-    link.style.display = 'none';
-    document.body.appendChild(link);
-
-    // Use requestAnimationFrame so DOM has mounted the element before clicking
-    requestAnimationFrame(() => {
+    const triggerDownload = (url: string) => {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
       link.click();
-      // Keep object URL alive for 5 seconds to prevent browser download interruption
       setTimeout(() => {
-        if (link.parentNode) {
-          link.parentNode.removeChild(link);
+        if (link.parentNode) link.parentNode.removeChild(link);
+      }, 1500);
+    };
+
+    if (variant.blob) {
+      // Use FileReader to produce a stable, inline Data URL
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (reader.result && typeof reader.result === 'string') {
+          triggerDownload(reader.result);
+        } else {
+          triggerDownload(variant.previewUrl || URL.createObjectURL(variant.blob));
         }
-        URL.revokeObjectURL(downloadUrl);
-      }, 5000);
-    });
+      };
+      reader.onerror = () => {
+        triggerDownload(variant.previewUrl || URL.createObjectURL(variant.blob));
+      };
+      reader.readAsDataURL(variant.blob);
+    } else if (variant.previewUrl) {
+      triggerDownload(variant.previewUrl);
+    }
   } catch (err) {
     console.error('Download single failed:', err);
   }
 }
 
 /**
- * Packages all variants into a single ZIP archive and triggers download directly in browser
+ * Packages all variants into a single ZIP archive and triggers download directly in browser.
+ * Uses Base64 Data URL to prevent Chrome network stream interruption.
  */
 export async function downloadAllVariantsAsZip(
   variants: ImageVariant[],
@@ -54,7 +64,8 @@ export async function downloadAllVariantsAsZip(
     const cleanName = (baseName || 'image')
       .replace(/\.[^/.]+$/, '')
       .replace(/[^a-zA-Z0-9_\-\s]/g, '')
-      .trim() || 'image';
+      .trim()
+      .replace(/\s+/g, '_') || 'image';
     const folder = zip.folder(`${cleanName}_variants`);
 
     variants.forEach((v) => {
@@ -65,29 +76,23 @@ export async function downloadAllVariantsAsZip(
       }
     });
 
-    const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+    // Generate as base64 for direct inline download without network/IPC stream issues
+    const base64Data = await zip.generateAsync({ type: 'base64' }, (metadata) => {
       if (onProgress) {
         onProgress(Math.round(metadata.percent));
       }
     });
 
-    const zipUrl = URL.createObjectURL(content);
+    const dataUrl = `data:application/zip;base64,${base64Data}`;
     const link = document.createElement('a');
-    link.href = zipUrl;
+    link.href = dataUrl;
     link.download = `${cleanName}_compressed_variants.zip`;
-    link.target = '_self';
     link.style.display = 'none';
     document.body.appendChild(link);
-
-    requestAnimationFrame(() => {
-      link.click();
-      setTimeout(() => {
-        if (link.parentNode) {
-          link.parentNode.removeChild(link);
-        }
-        URL.revokeObjectURL(zipUrl);
-      }, 10000);
-    });
+    link.click();
+    setTimeout(() => {
+      if (link.parentNode) link.parentNode.removeChild(link);
+    }, 1500);
   } catch (err) {
     console.error('Download ZIP failed:', err);
   }

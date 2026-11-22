@@ -1,3 +1,4 @@
+// ResizeSnap v1.1.0 - Frictionless direct download
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import confetti from 'canvas-confetti';
@@ -10,7 +11,7 @@ import { VariantCard } from './components/VariantCard';
 import { AuthModal } from './components/AuthModal';
 import GhostFibers from './components/GhostFibers';
 import { OriginalImage, ImageVariant } from './types';
-import { generateSteppedVariants } from './lib/compressor';
+import { generateSteppedVariants, parseOriginalImage } from './lib/compressor';
 import { downloadSingleVariant, downloadAllVariantsAsZip } from './lib/zipHelper';
 import { useAuth } from './context/AuthContext';
 
@@ -63,10 +64,6 @@ export const App: React.FC = () => {
 
   // Modals & Popups
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [pendingDownload, setPendingDownload] = useState<{
-    type: 'single' | 'all';
-    variantIndex?: number;
-  } | null>(null);
 
   // Sync Dark Mode class on <html>
   useEffect(() => {
@@ -133,10 +130,9 @@ export const App: React.FC = () => {
   const handleClearImage = () => {
     setOriginalImage(null);
     setVariants([]);
-    setPendingDownload(null);
   };
 
-  // Download Handlers
+  // Direct, Frictionless Download Handlers (No sign-in required)
   const triggerSingleDownload = (variant: ImageVariant) => {
     if (!originalImage) return;
     downloadSingleVariant(variant, originalImage.name);
@@ -156,15 +152,6 @@ export const App: React.FC = () => {
   };
 
   const handleDownloadClick = (variantIndex?: number) => {
-    if (!user) {
-      setPendingDownload({
-        type: variantIndex ? 'single' : 'all',
-        variantIndex,
-      });
-      setIsAuthModalOpen(true);
-      return;
-    }
-
     if (variantIndex) {
       const v = variants.find((item) => item.index === variantIndex);
       if (v) triggerSingleDownload(v);
@@ -173,24 +160,34 @@ export const App: React.FC = () => {
     }
   };
 
-  // Automatically execute pending download upon authentication
+  // Window-level Drag & Drop support: lets users drop an image anywhere on the page
   useEffect(() => {
-    if (user && pendingDownload) {
-      setIsAuthModalOpen(false);
+    const handleWindowDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
 
-      const timer = setTimeout(() => {
-        if (pendingDownload.type === 'single' && pendingDownload.variantIndex) {
-          const v = variants.find((item) => item.index === pendingDownload.variantIndex);
-          if (v) triggerSingleDownload(v);
-        } else {
-          triggerAllDownload();
+    const handleWindowDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const files = e.dataTransfer?.files;
+      if (files && files.length > 0 && files[0].type.startsWith('image/')) {
+        try {
+          const parsed = await parseOriginalImage(files[0]);
+          handleImageSelected(parsed);
+        } catch (err) {
+          console.error('Failed to parse dropped image:', err);
         }
-        setPendingDownload(null);
-      }, 250);
+      }
+    };
 
-      return () => clearTimeout(timer);
-    }
-  }, [user, pendingDownload, variants]);
+    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('drop', handleWindowDrop);
+    return () => {
+      window.removeEventListener('dragover', handleWindowDragOver);
+      window.removeEventListener('drop', handleWindowDrop);
+    };
+  }, []);
 
   const activeVariant = variants.find((v) => v.index === activeVariantIndex) || variants[0];
 
@@ -379,7 +376,6 @@ export const App: React.FC = () => {
                         isActive={activeVariantIndex === v.index}
                         onSelect={() => setActiveVariantIndex(v.index)}
                         onDownload={() => handleDownloadClick(v.index)}
-                        isAuthenticated={!!user}
                       />
                     ))}
                   </div>
@@ -443,11 +439,7 @@ export const App: React.FC = () => {
       {/* Modals */}
       <AuthModal
         isOpen={isAuthModalOpen}
-        onClose={() => {
-          setIsAuthModalOpen(false);
-          setPendingDownload(null);
-        }}
-        pendingVariantIndex={pendingDownload?.variantIndex}
+        onClose={() => setIsAuthModalOpen(false)}
       />
     </div>
   );

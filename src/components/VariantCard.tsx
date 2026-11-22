@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Download, Lock, Eye, Check } from 'lucide-react';
+import { Download, Eye, Check } from 'lucide-react';
 import { ImageVariant } from '../types';
 
 interface VariantCardProps {
@@ -8,7 +8,7 @@ interface VariantCardProps {
   isActive: boolean;
   onSelect: () => void;
   onDownload: () => void;
-  isAuthenticated: boolean;
+  isAuthenticated?: boolean;
 }
 
 export const VariantCard: React.FC<VariantCardProps> = ({
@@ -16,7 +16,6 @@ export const VariantCard: React.FC<VariantCardProps> = ({
   isActive,
   onSelect,
   onDownload,
-  isAuthenticated,
 }) => {
   return (
     <motion.div
@@ -96,29 +95,16 @@ export const VariantCard: React.FC<VariantCardProps> = ({
 
       {/* Action Buttons */}
       <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-white/[0.06]">
-        {/* Primary Download Button */}
+        {/* Primary Direct Download Button */}
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           transition={{ type: 'spring', stiffness: 300, damping: 25 }}
           onClick={onDownload}
-          className={`w-full py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-colors ${
-            isAuthenticated
-              ? 'bg-slate-900 hover:bg-black dark:bg-[#F5F5F7] dark:hover:bg-white text-white dark:text-slate-900'
-              : 'bg-[#0071E3] hover:bg-[#0062C4] text-white'
-          }`}
+          className="w-full py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-colors bg-slate-900 hover:bg-black dark:bg-[#F5F5F7] dark:hover:bg-white text-white dark:text-slate-900 cursor-pointer"
         >
-          {isAuthenticated ? (
-            <>
-              <Download className="w-3.5 h-3.5" />
-              <span>Download Image</span>
-            </>
-          ) : (
-            <>
-              <Lock className="w-3.5 h-3.5" />
-              <span>Sign in to Download</span>
-            </>
-          )}
+          <Download className="w-3.5 h-3.5" />
+          <span>Download Image</span>
         </motion.button>
 
         {/* Compare in Diff Button */}

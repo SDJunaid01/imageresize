@@ -25,6 +25,11 @@ export const Dropzone: React.FC<DropzoneProps> = ({
     if (!files || files.length === 0) return;
     const file = files[0];
 
+    // Reset input value so selecting same file works again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
     // Validate type
     if (!file.type.startsWith('image/')) {
       setErrorMessage('Please select a valid image file (JPEG, PNG, WebP, etc.).');
@@ -123,14 +128,21 @@ export const Dropzone: React.FC<DropzoneProps> = ({
             </div>
           </motion.div>
         ) : (
-          /* Image Loaded Card */
+          /* Image Loaded Card (Supports drag & drop to replace) */
           <motion.div
             key="dropzone-loaded"
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -16 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#141414]/90 border border-slate-200 dark:border-white/10 shadow-apple-card"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`rounded-3xl p-5 sm:p-6 bg-white dark:bg-[#141414]/90 border transition-all duration-200 shadow-apple-card ${
+              isDragOver
+                ? 'border-[#0071E3] bg-[#0071E3]/[0.05] dark:bg-[#2997FF]/[0.05] scale-[1.01]'
+                : 'border-slate-200 dark:border-white/10'
+            }`}
           >
             <div className="flex flex-col sm:flex-row items-center gap-5 justify-between">
               {/* Left Preview & Metadata */}

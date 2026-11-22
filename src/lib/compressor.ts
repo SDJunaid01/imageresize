@@ -31,7 +31,8 @@ export function loadImageFromFile(file: File): Promise<HTMLImageElement> {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
-      URL.revokeObjectURL(url);
+      // Delay revoke so canvas operations across binary search passes remain stable
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
       resolve(img);
     };
     img.onerror = (err) => {
