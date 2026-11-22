@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Lock, Mail, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, Lock, Mail, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2, Sparkles, RefreshCw, KeyRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface AuthModalProps {
@@ -9,19 +9,38 @@ interface AuthModalProps {
   pendingVariantIndex?: number | null;
 }
 
+// Strict RFC-compliant email regex
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
   pendingVariantIndex,
 }) => {
-  const { signInWithGoogle, signInWithPassword, signUpWithPassword, user } = useAuth();
+  const { signInWithOtp, verifyOtp, signInWithPassword, signUpWithPassword, user } = useAuth();
 
+  const [authMode, setAuthMode] = useState<'magic' | 'password'>('magic');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isMagicLinkSent, setIsMagicLinkSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [touchedEmail, setTouchedEmail] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  // Anti-spam cooldown timer
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    if (cooldown > 0) {
+      timer = setTimeout(() => setCooldown((prev) => prev - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [cooldown]);
 
   // Close automatically once signed in
   useEffect(() => {
@@ -30,15 +49,133 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   }, [user, isOpen, onClose]);
 
-  const handleEmailAuth = async (e: React.FormEvent) => {
+  // Strict email validation state
+  const isEmailValid = useMemo(() => {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) return false;
+    if (!EMAIL_REGEX.test(trimmed)) return false;
+    if (trimmed.endsWith('@example.com') || trimmed.endsWith('@test.com') || trimmed.endsWith('@fake.com')) {
+      return false;
+    }
+    return true;
+  }, [email]);
+
+  const emailErrorMessage = useMemo(() => {
+    if (!touchedEmail || !email) return null;
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed.includes('@')) {
+      return 'Email must include "@" (e.g. name@gmail.com)';
+    }
+    const parts = trimmed.split('@');
+    if (!parts[1] || !parts[1].includes('.')) {
+      return 'Please include a valid domain (e.g. .com, .net, .org)';
+    }
+    const domainParts = parts[1].split('.');
+    const tld = domainParts[domainParts.length - 1];
+    if (tld.length < 2) {
+      return 'Domain extension must be at least 2 characters (e.g. .com)';
+    }
+    if (trimmed.endsWith('@example.com') || trimmed.endsWith('@test.com')) {
+      return 'Please enter a real email address (e.g. @gmail.com)';
+    }
+    if (!EMAIL_REGEX.test(trimmed)) {
+      return 'Invalid email format. Please check for spaces or special characters.';
+    }
+    return null;
+  }, [email, touchedEmail]);
+
+  // Handle Magic Link Submit
+  const handleMagicLinkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) return;
+    setTouchedEmail(true);
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail || !isEmailValid) {
+      setStatusMessage({
+        text: 'Please enter a valid email address before requesting a login link.',
+        isError: true,
+      });
+      return;
+    }
+
+    if (cooldown > 0) return;
+
+    setLoading(true);
+    setStatusMessage(null);
+
+    const res = await signInWithOtp(cleanEmail);
+    setLoading(false);
+
+    if (res.success) {
+      setIsMagicLinkSent(true);
+      setStatusMessage({
+        text: `We sent a login email to ${cleanEmail}. Click the link in the email, or enter the 6-digit code below:`,
+        isError: false,
+      });
+      setCooldown(60);
+    } else {
+      setStatusMessage({
+        text: res.message || 'Failed to send login link. Please try again.',
+        isError: true,
+      });
+    }
+  };
+
+  // Handle OTP Code Verification
+  const handleVerifyOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanToken = otpCode.trim();
+
+    if (!cleanToken) {
+      setStatusMessage({ text: 'Please enter the 6-digit code from your email.', isError: true });
+      return;
+    }
+
+    setVerifyingOtp(true);
+    setStatusMessage(null);
+
+    const res = await verifyOtp(cleanEmail, cleanToken);
+    setVerifyingOtp(false);
+
+    if (!res.success) {
+      setStatusMessage({
+        text: res.message || 'Invalid or expired code. Please try clicking the link in your email or resend.',
+        isError: true,
+      });
+    }
+  };
+
+  // Handle Password Submit
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTouchedEmail(true);
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail || !isEmailValid) {
+      setStatusMessage({
+        text: 'Please enter a valid email address.',
+        isError: true,
+      });
+      return;
+    }
+
+    if (password.length < 6) {
+      setStatusMessage({
+        text: 'Password must be at least 6 characters.',
+        isError: true,
+      });
+      return;
+    }
+
     setLoading(true);
     setStatusMessage(null);
 
     const res = isSignUp
-      ? await signUpWithPassword(email, password)
-      : await signInWithPassword(email, password);
+      ? await signUpWithPassword(cleanEmail, password)
+      : await signInWithPassword(cleanEmail, password);
 
     setLoading(false);
     if (res.success) {
@@ -62,13 +199,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
           />
 
-          {/* Modal Card with Apple Spring Physics */}
+          {/* Modal Card */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 12 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            className="relative w-full max-w-[400px] rounded-3xl p-7 sm:p-8 bg-white dark:bg-[#141414] border border-slate-200 dark:border-white/10 shadow-apple-modal overflow-hidden z-10"
+            className="relative w-full max-w-[390px] rounded-3xl p-7 sm:p-8 bg-white dark:bg-[#141414] border border-slate-200 dark:border-white/10 shadow-apple-modal overflow-hidden z-10"
           >
             {/* Close Button */}
             <motion.button
@@ -83,7 +220,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </motion.button>
 
             {/* Header */}
-            <div className="flex flex-col items-center text-center mb-6">
+            <div className="flex flex-col items-center text-center mb-5">
               <div className="flex items-center justify-center py-1 mb-2">
                 <img
                   src="/logo.png"
@@ -93,19 +230,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                Sign in to ResizeSnap
+                {authMode === 'magic'
+                  ? 'Sign in with Magic Link'
+                  : isSignUp
+                  ? 'Create an Account'
+                  : 'Sign in to ResizeSnap'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-[280px] leading-relaxed">
-                {pendingVariantIndex
-                  ? `Variant #${pendingVariantIndex} is ready. Sign in to unlock your file.`
-                  : 'Sign in to download and manage your compressed images.'}
+                {authMode === 'magic'
+                  ? 'Passwordless login. We will send a secure one-click link and code to your inbox.'
+                  : pendingVariantIndex
+                  ? `Variant #${pendingVariantIndex} is ready. Sign in to download your file.`
+                  : 'Enter your credentials to download and manage your compressed images.'}
               </p>
             </div>
 
-            {/* Status Message */}
+            {/* Status Message (Success / Error / Feedback) */}
             {statusMessage && (
               <div
-                className={`p-3 rounded-xl text-xs mb-5 border font-medium flex items-start gap-2.5 ${
+                className={`p-3 rounded-xl text-xs mb-4 border font-medium flex items-start gap-2.5 ${
                   statusMessage.isError
                     ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-500/10 dark:border-rose-500/20 dark:text-rose-400'
                     : 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400'
@@ -120,52 +263,160 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             )}
 
-            <div className="space-y-5">
-              {/* GOOGLE SIGN-IN */}
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                onClick={signInWithGoogle}
-                className="w-full py-3 px-4 rounded-xl bg-white hover:bg-slate-50 dark:bg-[#1E1E1E] dark:hover:bg-[#252525] text-slate-800 dark:text-white font-semibold text-xs sm:text-sm border border-slate-300 dark:border-white/15 shadow-sm flex items-center justify-center gap-3 transition-colors active:scale-[0.98]"
-              >
-                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                  />
-                </svg>
-                <span>Continue with Google</span>
-              </motion.button>
+            {/* PRIMARY FLOW: MAGIC LINK (PASSWORDLESS) */}
+            {authMode === 'magic' ? (
+              <div className="space-y-4">
+                <form onSubmit={handleMagicLinkSubmit} className="space-y-4">
+                  {/* Email Field with Live Validation */}
+                  <div className="text-left">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                        Your Email Address
+                      </label>
+                      {touchedEmail && email && isEmailValid && (
+                        <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Valid email
+                        </span>
+                      )}
+                    </div>
 
-              {/* Minimal Divider with comfortable spacing */}
-              <div className="relative flex items-center justify-center my-2">
-                <div className="border-t border-slate-200 dark:border-white/10 w-full" />
-                <span className="bg-white dark:bg-[#141414] px-3 text-[11px] text-slate-400 dark:text-slate-500 shrink-0 font-medium uppercase tracking-wider">
-                  or with email
-                </span>
-                <div className="border-t border-slate-200 dark:border-white/10 w-full" />
+                    <div className="relative flex items-center">
+                      <span className="absolute left-3.5 flex items-center pointer-events-none text-slate-400 dark:text-slate-500 z-10">
+                        <Mail className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="email"
+                        required
+                        placeholder="name@gmail.com"
+                        value={email}
+                        onBlur={() => setTouchedEmail(true)}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          if (!touchedEmail) setTouchedEmail(true);
+                        }}
+                        style={{ paddingLeft: '42px', paddingRight: '16px' }}
+                        className={`w-full !pl-[42px] pr-4 py-3 rounded-xl text-sm bg-slate-50 dark:bg-[#1C1C1E] text-slate-900 dark:text-white border outline-none transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500 ${
+                          touchedEmail && email && !isEmailValid
+                            ? 'border-rose-400 dark:border-rose-500 focus:ring-2 focus:ring-rose-500/20'
+                            : touchedEmail && email && isEmailValid
+                            ? 'border-emerald-400 dark:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                            : 'border-slate-300 dark:border-white/15 focus:border-[#0071E3] dark:focus:border-[#2997FF] focus:bg-white dark:focus:bg-[#141414] focus:ring-2 focus:ring-[#0071E3]/20 dark:focus:ring-[#2997FF]/20'
+                        }`}
+                      />
+                    </div>
+
+                    {emailErrorMessage && (
+                      <p className="text-[11px] font-medium text-rose-500 dark:text-rose-400 mt-1.5 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        <span>{emailErrorMessage}</span>
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Submit Button */}
+                  <motion.button
+                    whileHover={isEmailValid && !loading && cooldown === 0 ? { scale: 1.02 } : {}}
+                    whileTap={isEmailValid && !loading && cooldown === 0 ? { scale: 0.98 } : {}}
+                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                    type="submit"
+                    disabled={loading || !isEmailValid || cooldown > 0}
+                    className="w-full py-3.5 px-4 rounded-xl font-bold text-sm bg-[#0071E3] hover:bg-[#0062C4] text-white shadow-sm flex items-center justify-center gap-2 transition-colors mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Sending Login Link...</span>
+                      </>
+                    ) : cooldown > 0 ? (
+                      <span>Resend in {cooldown}s</span>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        <span>{isMagicLinkSent ? 'Resend Magic Link' : 'Send Magic Link'}</span>
+                      </>
+                    )}
+                  </motion.button>
+                </form>
+
+                {/* Instant 6-Digit Code Fallback (Works regardless of where link opens!) */}
+                {isMagicLinkSent && (
+                  <motion.form
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                    onSubmit={handleVerifyOtpSubmit}
+                    className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3"
+                  >
+                    <div className="text-left">
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                        Or enter the 6-digit code from the email:
+                      </label>
+                      <div className="relative flex items-center">
+                        <span className="absolute left-3.5 flex items-center pointer-events-none text-slate-400 dark:text-slate-500 z-10">
+                          <KeyRound className="w-4 h-4" />
+                        </span>
+                        <input
+                          type="text"
+                          required
+                          maxLength={8}
+                          placeholder="123456"
+                          value={otpCode}
+                          onChange={(e) => setOtpCode(e.target.value)}
+                          style={{ paddingLeft: '42px', paddingRight: '16px' }}
+                          className="w-full !pl-[42px] pr-4 py-2.5 rounded-xl text-sm font-mono tracking-widest text-center bg-slate-50 dark:bg-[#1C1C1E] text-slate-900 dark:text-white border border-slate-300 dark:border-white/15 focus:border-[#0071E3] dark:focus:border-[#2997FF] outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={verifyingOtp || !otpCode.trim()}
+                      className="w-full py-2.5 px-4 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                    >
+                      {verifyingOtp ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Verifying...</span>
+                        </>
+                      ) : (
+                        <span>Verify Code & Sign In</span>
+                      )}
+                    </button>
+                  </motion.form>
+                )}
+
+                {/* Toggle to Password Mode */}
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('password');
+                      setStatusMessage(null);
+                    }}
+                    className="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white font-medium hover:underline transition-colors"
+                  >
+                    Or sign in with email and password →
+                  </button>
+                </div>
               </div>
-
-              {/* Email & Password Form with Generous Spacing */}
-              <form onSubmit={handleEmailAuth} className="space-y-4">
-                {/* Email Field */}
+            ) : (
+              /* SECONDARY FLOW: EMAIL & PASSWORD */
+              <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                {/* Email Field with Live Validation */}
                 <div className="text-left">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Email address
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Email address
+                    </label>
+                    {touchedEmail && email && isEmailValid && (
+                      <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Valid email
+                      </span>
+                    )}
+                  </div>
+
                   <div className="relative flex items-center">
                     <span className="absolute left-3.5 flex items-center pointer-events-none text-slate-400 dark:text-slate-500 z-10">
                       <Mail className="w-4 h-4" />
@@ -173,13 +424,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <input
                       type="email"
                       required
-                      placeholder="name@example.com"
+                      placeholder="name@gmail.com"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onBlur={() => setTouchedEmail(true)}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (!touchedEmail) setTouchedEmail(true);
+                      }}
                       style={{ paddingLeft: '42px', paddingRight: '16px' }}
-                      className="w-full !pl-[42px] pr-4 py-3 rounded-xl text-sm bg-slate-50 dark:bg-[#1C1C1E] text-slate-900 dark:text-white border border-slate-300 dark:border-white/15 focus:border-[#0071E3] dark:focus:border-[#2997FF] focus:bg-white dark:focus:bg-[#141414] focus:ring-2 focus:ring-[#0071E3]/20 dark:focus:ring-[#2997FF]/20 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none transition-all"
+                      className={`w-full !pl-[42px] pr-4 py-3 rounded-xl text-sm bg-slate-50 dark:bg-[#1C1C1E] text-slate-900 dark:text-white border outline-none transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500 ${
+                        touchedEmail && email && !isEmailValid
+                          ? 'border-rose-400 dark:border-rose-500 focus:ring-2 focus:ring-rose-500/20'
+                          : touchedEmail && email && isEmailValid
+                          ? 'border-emerald-400 dark:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                          : 'border-slate-300 dark:border-white/15 focus:border-[#0071E3] dark:focus:border-[#2997FF] focus:bg-white dark:focus:bg-[#141414] focus:ring-2 focus:ring-[#0071E3]/20 dark:focus:ring-[#2997FF]/20'
+                      }`}
                     />
                   </div>
+
+                  {emailErrorMessage && (
+                    <p className="text-[11px] font-medium text-rose-500 dark:text-rose-400 mt-1.5 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      <span>{emailErrorMessage}</span>
+                    </p>
+                  )}
                 </div>
 
                 {/* Password Field */}
@@ -194,6 +462,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
+                      minLength={6}
                       placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -209,43 +478,59 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                    At least 6 characters
+                  </p>
                 </div>
 
                 {/* Submit Action */}
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileHover={isEmailValid && password.length >= 6 && !loading ? { scale: 1.02 } : {}}
+                  whileTap={isEmailValid && password.length >= 6 && !loading ? { scale: 0.98 } : {}}
                   transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                   type="submit"
-                  disabled={loading}
-                  className="w-full py-3 px-4 rounded-xl font-bold text-sm bg-slate-900 hover:bg-black dark:bg-[#F5F5F7] dark:hover:bg-white text-white dark:text-slate-900 shadow-sm flex items-center justify-center gap-2 transition-colors mt-2"
+                  disabled={loading || !isEmailValid || password.length < 6}
+                  className="w-full py-3.5 px-4 rounded-xl font-bold text-sm bg-slate-900 hover:bg-black dark:bg-[#F5F5F7] dark:hover:bg-white text-white dark:text-slate-900 shadow-sm flex items-center justify-center gap-2 transition-colors mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading
-                    ? 'Processing...'
+                    ? 'Please wait...'
                     : isSignUp
-                    ? 'Create Account'
-                    : 'Sign In'}
+                    ? 'Create Account & Download'
+                    : 'Sign In & Download'}
                   <ArrowRight className="w-4 h-4" />
                 </motion.button>
 
-                {/* Toggle Sign Up / Sign In */}
-                <div className="text-center pt-2">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
-                    {isSignUp ? 'Already have an account?' : "Don't have an account?"}
-                  </span>
+                {/* Toggle Sign Up / Sign In & Back to Magic Link */}
+                <div className="flex flex-col items-center gap-1.5 pt-2">
+                  <div className="text-center">
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {isSignUp ? 'Already have an account?' : "Don't have an account?"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSignUp(!isSignUp);
+                        setStatusMessage(null);
+                      }}
+                      className="text-xs text-[#0071E3] dark:text-[#2997FF] font-semibold hover:underline ml-1.5"
+                    >
+                      {isSignUp ? 'Sign in' : 'Create one'}
+                    </button>
+                  </div>
+
                   <button
                     type="button"
                     onClick={() => {
-                      setIsSignUp(!isSignUp);
+                      setAuthMode('magic');
                       setStatusMessage(null);
                     }}
-                    className="text-xs text-[#0071E3] dark:text-[#2997FF] font-semibold hover:underline ml-1.5"
+                    className="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white font-medium hover:underline transition-colors mt-1"
                   >
-                    {isSignUp ? 'Sign in' : 'Create one'}
+                    ← Back to passwordless Magic Link
                   </button>
                 </div>
               </form>
-            </div>
+            )}
           </motion.div>
         </div>
       )}
