@@ -1,0 +1,39 @@
+# Environment variables & secrets (CRITICAL: Do NOT commit)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+*.env
+
+# Archived old project
+_archive_sadaksuraksha/
+
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+.cache/
+
+# IDE & OS files
+.DS_Store
+Thumbs.db
+*.sublime-workspace
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+# Logs
+logs/
+*.log
