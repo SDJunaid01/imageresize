@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Lock, Mail, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2, Sparkles, RefreshCw, KeyRound } from 'lucide-react';
+import { X, Lock, Mail, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2, Sparkles, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface AuthModalProps {
@@ -17,17 +17,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   pendingVariantIndex,
 }) => {
-  const { signInWithOtp, verifyOtp, signInWithPassword, signUpWithPassword, user } = useAuth();
+  const { signInWithOtp, signInWithPassword, signUpWithPassword, user } = useAuth();
 
   const [authMode, setAuthMode] = useState<'magic' | 'password'>('magic');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [otpCode, setOtpCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [isMagicLinkSent, setIsMagicLinkSent] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [touchedEmail, setTouchedEmail] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -110,38 +108,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (res.success) {
       setIsMagicLinkSent(true);
       setStatusMessage({
-        text: `We sent a login email to ${cleanEmail}. Click the link in the email, or enter the 6-digit code below:`,
+        text: `We sent a secure login link to ${cleanEmail}. Click the link in your email to complete sign in!`,
         isError: false,
       });
       setCooldown(60);
     } else {
       setStatusMessage({
         text: res.message || 'Failed to send login link. Please try again.',
-        isError: true,
-      });
-    }
-  };
-
-  // Handle OTP Code Verification
-  const handleVerifyOtpSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanToken = otpCode.trim();
-
-    if (!cleanToken) {
-      setStatusMessage({ text: 'Please enter the 6-digit code from your email.', isError: true });
-      return;
-    }
-
-    setVerifyingOtp(true);
-    setStatusMessage(null);
-
-    const res = await verifyOtp(cleanEmail, cleanToken);
-    setVerifyingOtp(false);
-
-    if (!res.success) {
-      setStatusMessage({
-        text: res.message || 'Invalid or expired code. Please try clicking the link in your email or resend.',
         isError: true,
       });
     }
@@ -238,10 +211,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-[280px] leading-relaxed">
                 {authMode === 'magic'
-                  ? 'Passwordless login. We will send a secure one-click link and code to your inbox.'
-                  : pendingVariantIndex
-                  ? `Variant #${pendingVariantIndex} is ready. Sign in to download your file.`
-                  : 'Enter your credentials to download and manage your compressed images.'}
+                  ? 'Passwordless login. We will send a secure one-click login link to your email.'
+                  : 'Enter your credentials to sync and manage your compressed images across devices.'}
               </p>
             </div>
 
@@ -338,53 +309,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     )}
                   </motion.button>
                 </form>
-
-                {/* Instant 6-Digit Code Fallback (Works regardless of where link opens!) */}
-                {isMagicLinkSent && (
-                  <motion.form
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                    onSubmit={handleVerifyOtpSubmit}
-                    className="pt-3 border-t border-slate-200 dark:border-white/10 space-y-3"
-                  >
-                    <div className="text-left">
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                        Or enter the 6-digit code from the email:
-                      </label>
-                      <div className="relative flex items-center">
-                        <span className="absolute left-3.5 flex items-center pointer-events-none text-slate-400 dark:text-slate-500 z-10">
-                          <KeyRound className="w-4 h-4" />
-                        </span>
-                        <input
-                          type="text"
-                          required
-                          maxLength={8}
-                          placeholder="123456"
-                          value={otpCode}
-                          onChange={(e) => setOtpCode(e.target.value)}
-                          style={{ paddingLeft: '42px', paddingRight: '16px' }}
-                          className="w-full !pl-[42px] pr-4 py-2.5 rounded-xl text-sm font-mono tracking-widest text-center bg-slate-50 dark:bg-[#1C1C1E] text-slate-900 dark:text-white border border-slate-300 dark:border-white/15 focus:border-[#0071E3] dark:focus:border-[#2997FF] outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={verifyingOtp || !otpCode.trim()}
-                      className="w-full py-2.5 px-4 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-                    >
-                      {verifyingOtp ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Verifying...</span>
-                        </>
-                      ) : (
-                        <span>Verify Code & Sign In</span>
-                      )}
-                    </button>
-                  </motion.form>
-                )}
 
                 {/* Toggle to Password Mode */}
                 <div className="text-center pt-1">
